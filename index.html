@@ -125,6 +125,15 @@
       display: flex;
       justify-content: center;
       align-items: center;
+      min-width: 160px;
+      min-height: 160px;
+    }
+
+    .upload-status {
+      font-size: 14px;
+      color: #f39c12;
+      margin-top: 10px;
+      text-align: center;
     }
 
     .btn-secondary {
@@ -180,11 +189,14 @@
       <img id="final-strip" class="strip-img" alt="Photo Strip">
 
       <div class="qr-container">
-        <div class="qr-title">สแกนเพื่อเข้าสู่ Google Drive</div>
-        <div class="qr-box" id="qrcode-box"></div>
+        <div class="qr-title">สแกนเพื่อดาวน์โหลดรูปภาพ</div>
+        <div class="qr-box" id="qrcode-box">
+          <span style="color:#666; font-size:14px;" id="qr-loading">กำลังอัปโหลด...</span>
+        </div>
+        <div id="upload-status" class="upload-status">กำลังส่งภาพไปยัง Google Drive...</div>
         
         <!-- ลิงก์ดาวน์โหลดตรงลงอุปกรณ์ -->
-        <a id="download-btn" class="btn-download" download="photobooth.png">📥 บันทึกรูปภาพลงเครื่อง</a>
+        <a id="download-btn" class="btn-download" download="photobooth.png">📥 ดาวน์โหลดลงเครื่อง</a>
         <button class="btn-secondary" onclick="resetBooth()">ถ่ายใหม่อีกครั้ง</button>
       </div>
     </div>
@@ -202,11 +214,12 @@
     const snapBtn = document.getElementById('snap-btn');
     const downloadBtn = document.getElementById('download-btn');
     const qrcodeBox = document.getElementById('qrcode-box');
+    const uploadStatus = document.getElementById('upload-status');
 
     let capturedPhotos = [];
 
-    // ลิงก์โฟลเดอร์ Google Drive สำหรับสร้าง QR Code
-    const GOOGLE_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1j0iLmsSVEKsDLiYV621DmuRx2sf72PN8";
+    // URL ของ Google Apps Script Web App ที่อัปเดตล่าสุด
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5lhzcxE28syFgbaqW2u3j0Lk776vMzKkaNDT48-5xb6z0k7Bmdfuut5YwWVELwHf4/exec";
 
     // 1. เสียงชัตเตอร์กล้องดิจิทัล
     function playCameraShutterSound() {
@@ -294,19 +307,19 @@
       capturedPhotos.push(tempCanvas);
     }
 
-    // วาดภาพรวมเข้ากับ frame.png อย่างสมบูรณ์แบบ
+    // วาดภาพรวมเข้ากับ frame.png
     function generateFinalStrip() {
       return new Promise(resolve => {
         const frameImg = new Image();
         frameImg.src = 'frame.png';
         frameImg.crossOrigin = 'Anonymous';
 
-        frameImg.onload = () => {
+        frameImg.onload = async () => {
           // ขนาดจริงของกรอบ (682 x 1024)
           canvas.width = frameImg.width;
           canvas.height = frameImg.height;
 
-          // พิกัดช่องภาพที่ 1, 2, 3 (ปรับขอบเขตคลุมพื้นที่จริง)
+          // พิกัดช่องภาพที่ 1, 2, 3
           const slots = [
             { x: 135, y: 215, w: 398, h: 222 }, // ช่องที่ 1
             { x: 100, y: 446, w: 430, h: 232 }, // ช่องที่ 2
@@ -330,20 +343,57 @@
           downloadBtn.href = finalDataUrl;
           resultCard.style.display = 'flex';
 
-          // 3. สร้าง QR Code สำหรับเปิดโฟลเดอร์ Google Drive
+          // 3. ส่งภาพไปยัง Web App เพื่ออัปโหลดเข้า Drive Folder
+          uploadToGoogleDrive(finalDataUrl);
+
+          resolve();
+        };
+      });
+    }
+
+    // ฟังก์ชันส่งภาพไปยัง Google Apps Script
+    async function uploadToGoogleDrive(base64Image) {
+      qrcodeBox.innerHTML = '<span style="color:#666; font-size:14px;">กำลังอัปโหลด...</span>';
+      uploadStatus.innerText = "กำลังส่งภาพไปยัง Google Drive...";
+      uploadStatus.style.color = "#f39c12";
+
+      try {
+        const base64Data = base64Image.replace(/^data:image\/(png|jpeg);base64,/, "");
+        
+        const response = await fetch(SCRIPT_URL, {
+          method: "POST",
+          body: JSON.stringify({
+            image: base64Data,
+            filename: "photobooth_" + Date.now() + ".png"
+          })
+        });
+
+        const result = await response.json();
+
+        if (result.status === "success" || result.url) {
+          const fileUrl = result.url;
+          uploadStatus.innerText = "อัปโหลดสำเร็จ! สแกน QR Code เพื่อรับรูปภาพได้เลย";
+          uploadStatus.style.color = "#27ae60";
+
+          // สร้าง QR Code ของรูปภาพเฉพาะภาพนั้น
           qrcodeBox.innerHTML = "";
           new QRCode(qrcodeBox, {
-            text: GOOGLE_DRIVE_FOLDER_URL,
+            text: fileUrl,
             width: 160,
             height: 160,
             colorDark : "#000000",
             colorLight : "#ffffff",
             correctLevel : QRCode.CorrectLevel.H
           });
-
-          resolve();
-        };
-      });
+        } else {
+          throw new Error(result.message || "Upload Failed");
+        }
+      } catch (error) {
+        console.error(error);
+        uploadStatus.innerText = "อัปโหลดไม่สำเร็จ (แต่สามารถบันทึกลงเครื่องได้เลย)";
+        uploadStatus.style.color = "#e74c3c";
+        qrcodeBox.innerHTML = '<span style="color:#999; font-size:12px;">เกิดข้อผิดพลาดในการสร้าง QR</span>';
+      }
     }
 
     // ฟังก์ชันตัดและครอบภาพให้พอดีช่องโดยไม่เสียอัตราส่วน
