@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photo Booth</title>
+  <!-- QR Code Library & Canvas Confetti -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+    body { background-color: #121212; color: #fff; display: flex; height: 100vh; overflow: hidden; }
+    
+    .main-container { display: flex; width: 100%; height: 100%; }
+    .camera-section { flex: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; background: #000; }
+    
+    video { width: 90%; max-height: 80vh; border-radius: 12px; transform: scaleX(-1); object-fit: cover; }
+    
+    .countdown-overlay {
+      position: absolute; font-size: 160px; font-weight: bold; color: #fff;
+      text-shadow: 0 0 20px rgba(0,0,0,0.8); display: none; z-index: 10;
+    }
+
+    .controls { margin-top: 20px; display: flex; gap: 15px; }
+    button {
+      padding: 15px 40px; font-size: 20px; border: none; border-radius: 30px;
+      background: #ffffff; color: #000; font-weight: bold; cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    button:hover { background: #dddddd; transform: scale(1.05); }
+    select { padding: 10px; border-radius: 8px; font-size: 14px; }
+
+    /* Modal / Popup หน้าแสดงผลงาน */
+    .result-modal {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.9); z-index: 100; justify-content: center; align-items: center;
+    }
+    .result-content {
+      background: #1e1e1e; padding: 30px; border-radius: 16px; display: flex;
+      gap: 30px; align-items: center; max-width: 90%; max-height: 90%;
+    }
+    .preview-image { max-height: 75vh; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .qr-container { display: flex; flex-direction: column; align-items: center; gap: 20px; text-align: center; }
+    #qrcode { background: #fff; padding: 15px; border-radius: 12px; }
+    
+    .loader {
+      border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%;
+      width: 40px; height: 40px; animation: spin 1s linear infinite; display: none;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div class="main-container">
+  <div class="camera-section">
+    <video id="webcam" autoplay playsinline></video>
+    <div id="countdown" class="countdown-overlay">3</div>
+    
+    <div class="controls">
+      <select id="cameraSelect"></select>
+      <button id="startBtn" onclick="startPhotoBooth()">ถ่ายภาพ (START)</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal สรุปผล & QR Code -->
+<div id="resultModal" class="result-modal">
+  <div class="result-content">
+    <img id="finalPhoto" class="preview-image" src="" alt="Photo Booth Strip">
+    <div class="qr-container">
+      <h2>สแกนเพื่อรับรูปภาพ</h2>
+      <div id="loader" class="loader"></div>
+      <div id="qrcode"></div>
+      <p style="color:#aaa; font-size: 14px;">ภาพจะถูกบันทึกลง Google Drive อัตโนมัติ</p>
+      <button onclick="closeModal()">ถ่ายใหม่อีกครั้ง</button>
+    </div>
+  </div>
+</div>
+
+<canvas id="hiddenCanvas" style="display:none;"></canvas>
+
+<script>
+  // 📌 นำ Web App URL ที่ได้จาก Step 1 มาวางที่นี่
+  const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5lhzcxE28syFgbaqW2u3j0Lk776vMzKkaNDT48-5xb6z0k7Bmdfuut5YwWVELwHf4/exec"; 
+
+  const video = document.getElementById('webcam');
+  const cameraSelect = document.getElementById('cameraSelect');
+  const countdownEl = document.getElementById('countdown');
+  const resultModal = document.getElementById('resultModal');
+  const finalPhoto = document.getElementById('finalPhoto');
+  const qrcodeDiv = document.getElementById('qrcode');
+  const loader = document.getElementById('loader');
+
+  let photos = [];
+  const TOTAL_SHOTS = 3; // จำนวนช็อตที่ถ่าย (3 รูป)
+
+  // 1. ดึงรายการกล้องที่เชื่อมต่อทั้งหมด
+  async function getCameras() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter(device => device.kind === 'videoinput');
+    cameraSelect.innerHTML = '';
+    videoDevices.forEach((device, index) => {
+      const option = document.createElement('option');
+      option.value = device.deviceId;
+      option.text = device.label || `กล้อง ${index + 1}`;
+      cameraSelect.appendChild(option);
+    });
+  }
+
+  // 2. เปิดใช้งานกล้องที่เลือก
+  async function startCamera(deviceId) {
+    const constraints = {
+      video: {
+        deviceId: deviceId ? { exact: deviceId } : undefined,
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      }
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+  }
+
+  cameraSelect.addEventListener('change', () => startCamera(cameraSelect.value));
+
+  // 3. เริ่มขั้นตอนนับถอยหลังถ่ายรูป
+  async function startPhotoBooth() {
+    document.getElementById('startBtn').disabled = true;
+    photos = [];
+
+    for (let i = 0; i < TOTAL_SHOTS; i++) {
+      await runCountdown(3); // นับถอยหลัง 3 วินาทีต่อภาพ
+      takeSnapshot();
+      await new Promise(r => setTimeout(r, 1000)); // พัก 1 วินาทีระหว่างช็อต
+    }
+
+    generatePhotoStrip();
+    document.getElementById('startBtn').disabled = false;
+  }
+
+  function runCountdown(seconds) {
+    return new Promise((resolve) => {
+      countdownEl.style.display = 'block';
+      let count = seconds;
+      countdownEl.innerText = count;
+
+      let timer = setInterval(() => {
+        count--;
+        if (count > 0) {
+          countdownEl.innerText = count;
+        } else {
+          clearInterval(timer);
+          countdownEl.style.display = 'none';
+          resolve();
+        }
+      }, 1000);
+    });
+  }
+
+  // 4. บันทึกภาพแต่ละช็อตลง Memory
+  function takeSnapshot() {
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    
+    // กลับด้านภาพ (Mirroring) ให้ตรงกับมุมมอง
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    photos.push(canvas);
+  }
+
+  // 5. นำภาพมารวมกันเป็น Photo Strip (กรอบ Photo Booth)
+  function generatePhotoStrip() {
+    const canvas = document.getElementById('hiddenCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const photoWidth = 600;
+    const photoHeight = 400;
+    const padding = 30;
+    const headerSpace = 40;
+    const footerSpace = 100;
+
+    canvas.width = photoWidth + (padding * 2);
+    canvas.height = (photoHeight * TOTAL_SHOTS) + (padding * (TOTAL_SHOTS + 1)) + footerSpace;
+
+    // พื้นหลังแถบภาพ (สีขาว/มินิมอล)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // วาดภาพแต่ละช็อตลงบน Frame (ปรับเป็นโทน B&W หากต้องการ)
+    photos.forEach((imgCanvas, index) => {
+      const yPos = padding + index * (photoHeight + padding);
+      
+      // ปรับภาพให้เป็นขาวดำ (สไตล์ภาพตัวอย่าง)
+      ctx.filter = 'grayscale(100%) contrast(110%)';
+      ctx.drawImage(imgCanvas, padding, yPos, photoWidth, photoHeight);
+      ctx.filter = 'none'; // รีเซ็ตฟิลเตอร์
+    });
+
+    // เพิ่มข้อความด้านล่าง (Footer Branding)
+    ctx.fillStyle = '#000000';
+    ctx.font = 'italic 20px Georgia';
+    ctx.textAlign = 'center';
+    const today = new Date().toLocaleDateString('th-TH');
+    ctx.fillText(`MEMORIES • ${today}`, canvas.width / 2, canvas.height - 40);
+
+    const dataUrl = canvas.toDataURL('image/png');
+    finalPhoto.src = dataUrl;
+    
+    // แสดง Modal และอัปโหลดไปยัง Google Drive
+    resultModal.style.display = 'flex';
+    uploadToGoogleDrive(dataUrl);
+  }
+
+  // 6. อัปโหลดภาพไปยัง Google Apps Script
+  function uploadToGoogleDrive(base64Image) {
+    qrcodeDiv.innerHTML = '';
+    loader.style.display = 'block';
+
+    fetch(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({ image: base64Image })
+    })
+    .then(res => res.json())
+    .then(data => {
+      loader.style.display = 'none';
+      if (data.status === 'success') {
+        // สร้าง QR Code จาก URL สำหรับดาวน์โหลดภาพ
+        new QRCode(qrcodeDiv, {
+          text: data.downloadUrl,
+          width: 150,
+          height: 150
+        });
+      } else {
+        alert('เกิดข้อผิดพลาดในการอัปโหลดภาพ');
+      }
+    })
+    .catch(err => {
+      loader.style.display = 'none';
+      console.error(err);
+    });
+  }
+
+  function closeModal() {
+    resultModal.style.display = 'none';
+  }
+
+  // เริ่มต้นระบบ
+  navigator.mediaDevices.getUserMedia({ video: true }).then(() => {
+    getCameras().then(() => {
+      if (cameraSelect.options.length > 0) {
+        startCamera(cameraSelect.value);
+      }
+    });
+  });
+</script>
+
+</body>
+</html>
