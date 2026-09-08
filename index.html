@@ -4,12 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Photo Booth - พิพิธภัณฑ์การเกษตร</title>
+  <!-- ดึงคลังสร้าง QR Code และ Font -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background-color: #1a1a1a;
+      background-color: #121212;
       color: #fff;
-      font-family: 'Kanit', sans-serif, Tahoma;
+      font-family: 'Kanit', sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -18,31 +21,40 @@
       padding: 20px;
     }
 
-    .container {
+    .header-title {
+      font-size: 24px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .main-container {
       display: flex;
       flex-wrap: wrap;
       gap: 30px;
       justify-content: center;
       align-items: flex-start;
-      max-width: 1100px;
+      max-width: 1000px;
       width: 100%;
     }
 
-    .preview-box, .result-box {
-      background: #2a2a2a;
-      padding: 20px;
+    .card {
+      background: #1e1e1e;
       border-radius: 16px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      padding: 20px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.6);
       display: flex;
       flex-direction: column;
       align-items: center;
     }
 
-    /* กล้องและหน้าจอ Live Preview */
-    .camera-container {
+    /* ฝั่งกล้องถ่ายภาพ */
+    .camera-card { width: 420px; }
+    .video-wrapper {
       position: relative;
-      width: 400px;
-      height: 600px;
+      width: 100%;
+      height: 560px;
       background: #000;
       border-radius: 12px;
       overflow: hidden;
@@ -58,64 +70,89 @@
     .countdown-overlay {
       position: absolute;
       top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.3);
       display: flex;
       justify-content: center;
       align-items: center;
-      font-size: 120px;
+      font-size: 130px;
       font-weight: bold;
-      color: #ffeb3b;
+      color: #f39c12;
       text-shadow: 0 0 20px rgba(0,0,0,0.8);
-      pointer-events: none;
       display: none;
     }
 
-    /* ปุ่มกด */
-    .btn {
-      background: linear-gradient(135deg, #ffc107, #ff9800);
-      color: #000;
+    .btn-snap {
+      background: linear-gradient(135deg, #f39c12, #e67e22);
+      color: #fff;
       border: none;
-      padding: 14px 32px;
+      padding: 16px 36px;
       font-size: 20px;
-      font-weight: bold;
+      font-weight: 600;
       border-radius: 30px;
       cursor: pointer;
       margin-top: 20px;
+      width: 100%;
       transition: all 0.2s ease;
-      box-shadow: 0 4px 15px rgba(255, 152, 0, 0.4);
+      box-shadow: 0 4px 15px rgba(243, 156, 18, 0.4);
     }
-    .btn:hover { transform: scale(1.05); }
-    .btn:active { transform: scale(0.98); }
+    .btn-snap:hover { transform: translateY(-2px); }
+    .btn-snap:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    /* ผลลัพธ์ */
-    .strip-preview {
-      width: 320px;
+    /* ฝั่งแสดงผลลัพธ์ */
+    .result-card { width: 380px; display: none; }
+    .result-title { font-size: 20px; margin-bottom: 15px; }
+
+    .strip-img {
+      width: 260px;
       border-radius: 8px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      box-shadow: 0 5px 20px rgba(0,0,0,0.5);
     }
 
-    .qr-section {
+    .qr-container {
       margin-top: 20px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 12px;
+      width: 100%;
     }
 
+    .qr-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; text-align: center; }
+
     .qr-box {
-      width: 180px;
-      height: 180px;
       background: #fff;
-      padding: 10px;
+      padding: 12px;
       border-radius: 12px;
       display: flex;
       justify-content: center;
       align-items: center;
     }
 
-    .qr-box img {
+    .btn-secondary {
+      background: #e67e22;
+      color: #fff;
+      border: none;
+      padding: 12px 28px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 25px;
+      cursor: pointer;
+      margin-top: 15px;
       width: 100%;
-      height: 100%;
-      object-fit: contain;
+      transition: all 0.2s;
+    }
+
+    .btn-download {
+      background: #27ae60;
+      color: #fff;
+      text-decoration: none;
+      display: inline-block;
+      text-align: center;
+      padding: 12px 28px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 25px;
+      margin-top: 10px;
+      width: 100%;
     }
 
     canvas { display: none; }
@@ -123,30 +160,32 @@
 </head>
 <body>
 
-  <h2>📸 พิพิธภัณฑ์การเกษตร Photo Booth</h2>
+  <div class="header-title">
+    <span>📷</span> พิพิธภัณฑ์การเกษตร Photo Booth
+  </div>
 
-  <div class="container">
-    <!-- ฝั่งกล้องถ่ายรูป -->
-    <div class="preview-box">
-      <div class="camera-container">
+  <div class="main-container">
+    <!-- หน้าจอกล้อง -->
+    <div class="card camera-card">
+      <div class="video-wrapper">
         <video id="video" autoplay playsinline></video>
         <div id="countdown" class="countdown-overlay">3</div>
       </div>
-      <button id="snap-btn" class="btn" onclick="startPhotoProcess()">เริ่มถ่ายภาพ (3 รูป)</button>
+      <button id="snap-btn" class="btn-snap" onclick="startPhotoProcess()">เริ่มถ่ายภาพ (3 รูป)</button>
     </div>
 
-    <!-- ฝั่งแสดงผลงาน & QR Code -->
-    <div class="result-box" id="result-box" style="display:none;">
-      <h3>ผลลัพธ์รูปถ่าย</h3>
-      <img id="final-strip" class="strip-preview" alt="Photo Strip">
-      
-      <div class="qr-section">
-        <p style="font-size: 18px; font-weight: bold;">สแกนเพื่อดาวน์โหลดรูปภาพ</p>
-        <div class="qr-box">
-          <img id="qr-code" src="" alt="QR Code">
-        </div>
-        <p style="font-size: 12px; color: #aaa;">รูปภาพจะถูกบันทึกลง Google Drive / Server</p>
-        <button class="btn" onclick="resetBooth()">ถ่ายใหม่อีกครั้ง</button>
+    <!-- หน้าจอแสดงผลงาน & QR Code -->
+    <div class="card result-card" id="result-card">
+      <div class="result-title">ผลลัพธ์รูปถ่าย</div>
+      <img id="final-strip" class="strip-img" alt="Photo Strip">
+
+      <div class="qr-container">
+        <div class="qr-title">สแกนเพื่อเข้าสู่ Google Drive</div>
+        <div class="qr-box" id="qrcode-box"></div>
+        
+        <!-- ลิงก์ดาวน์โหลดตรงลงอุปกรณ์ -->
+        <a id="download-btn" class="btn-download" download="photobooth.png">📥 บันทึกรูปภาพลงเครื่อง</a>
+        <button class="btn-secondary" onclick="resetBooth()">ถ่ายใหม่อีกครั้ง</button>
       </div>
     </div>
   </div>
@@ -159,36 +198,37 @@
     const ctx = canvas.getContext('2d');
     const countdownEl = document.getElementById('countdown');
     const finalStrip = document.getElementById('final-strip');
-    const qrCode = document.getElementById('qr-code');
-    const resultBox = document.getElementById('result-box');
+    const resultCard = document.getElementById('result-card');
     const snapBtn = document.getElementById('snap-btn');
+    const downloadBtn = document.getElementById('download-btn');
+    const qrcodeBox = document.getElementById('qrcode-box');
 
     let capturedPhotos = [];
 
-    // 1. สร้างระบบเสียงชัตเตอร์กล้องดิจิทัล (แชะ! เสียงดังฟังชัด)
-    function playLoudShutterSound() {
+    // ลิงก์โฟลเดอร์ Google Drive สำหรับสร้าง QR Code
+    const GOOGLE_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1j0iLmsSVEKsDLiYV621DmuRx2sf72PN8";
+
+    // 1. เสียงชัตเตอร์กล้องดิจิทัล
+    function playCameraShutterSound() {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      
-      // เสียงคลิกชัตเตอร์กลไก (Click/Snap)
-      const bufferSize = audioCtx.sampleRate * 0.15; // 0.15 วินาที
+      const bufferSize = audioCtx.sampleRate * 0.12;
       const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
       const data = buffer.getChannelData(0);
       
       for (let i = 0; i < bufferSize; i++) {
-        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.1));
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.08));
       }
 
       const noise = audioCtx.createBufferSource();
       noise.buffer = buffer;
 
-      // Filter เพิ่มความดังและกระแทกของเสียง
       const filter = audioCtx.createBiquadFilter();
       filter.type = 'highpass';
-      filter.frequency.value = 1000;
+      filter.frequency.value = 800;
 
       const gain = audioCtx.createGain();
-      gain.gain.setValueAtTime(2.5, audioCtx.currentTime); // เพิ่มระดับความดัง
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+      gain.gain.setValueAtTime(3.0, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
 
       noise.connect(filter);
       filter.connect(gain);
@@ -197,7 +237,7 @@
       noise.start();
     }
 
-    // เปิดใช้งานกล้อง HD
+    // เปิดกล้อง HD
     navigator.mediaDevices.getUserMedia({ 
       video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } 
     }).then(stream => {
@@ -206,22 +246,19 @@
       alert("ไม่สามารถเปิดกล้องได้: " + err);
     });
 
-    // เริ่มถ่ายภาพ 3 รูปต่อเนื่อง
     async function startPhotoProcess() {
       capturedPhotos = [];
       snapBtn.disabled = true;
-      snapBtn.style.opacity = "0.5";
 
       for (let i = 1; i <= 3; i++) {
         await runCountdown(3);
-        playLoudShutterSound();
+        playCameraShutterSound();
         capturePhoto();
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 600));
       }
 
       await generateFinalStrip();
       snapBtn.disabled = false;
-      snapBtn.style.opacity = "1";
     }
 
     function runCountdown(seconds) {
@@ -249,7 +286,7 @@
       tempCanvas.height = video.videoHeight || 720;
       const tCtx = tempCanvas.getContext('2d');
 
-      // กลับด้านรูป (Mirror) ให้เหมือนกระจก
+      // Mirror ภาพ
       tCtx.translate(tempCanvas.width, 0);
       tCtx.scale(-1, 1);
       tCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
@@ -257,7 +294,7 @@
       capturedPhotos.push(tempCanvas);
     }
 
-    // วาดภาพรวมเข้ากรอบ frame.png และแก้ไขปัญหารูปสั้น/ขอบขาว
+    // วาดภาพรวมเข้ากับ frame.png อย่างสมบูรณ์แบบ
     function generateFinalStrip() {
       return new Promise(resolve => {
         const frameImg = new Image();
@@ -265,46 +302,51 @@
         frameImg.crossOrigin = 'Anonymous';
 
         frameImg.onload = () => {
-          // ตั้งขนาด Canvas ให้ตรงกับขนาดพิกเซลจริงของ frame.png (682x1024)
+          // ขนาดจริงของกรอบ (682 x 1024)
           canvas.width = frameImg.width;
           canvas.height = frameImg.height;
 
-          // พิกัดช่องเจาะรูทั้ง 3 ช่อง (คำนวณครอบคลุมเต็มพื้นที่ ไม่ติดขอบขาว)
+          // พิกัดช่องภาพที่ 1, 2, 3 (ปรับขอบเขตคลุมพื้นที่จริง)
           const slots = [
-            { x: 120, y: 220, w: 440, h: 225 }, // ช่องที่ 1
-            { x: 100, y: 450, w: 460, h: 235 }, // ช่องที่ 2
-            { x: 120, y: 700, w: 450, h: 235 }  // ช่องที่ 3 (ขยายพื้นที่ความสูงรองรับเต็มช่อง)
+            { x: 135, y: 215, w: 398, h: 222 }, // ช่องที่ 1
+            { x: 100, y: 446, w: 430, h: 232 }, // ช่องที่ 2
+            { x: 132, y: 707, w: 420, h: 222 }  // ช่องที่ 3
           ];
 
-          // 1. วาดรูปถ่ายลงในช่องเจาะรูแต่ละช่องแบบ COVER (ไม่เกิดขอบขาว)
+          // 1. วาดรูปถ่ายทั้ง 3 รูปลงบน Canvas ก่อน
           capturedPhotos.forEach((photo, idx) => {
             if (idx < 3) {
-              const slot = slots[idx];
-              drawCoverImage(ctx, photo, slot.x, slot.y, slot.w, slot.h);
+              const s = slots[idx];
+              drawCoverImage(ctx, photo, s.x, s.y, s.w, s.h);
             }
           });
 
-          // 2. วาดกรอบ frame.png ทับด้านบนสุด
+          // 2. วาดกรอบ frame.png ทับด้านบนรูปถ่าย
           ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
 
-          // แปลงเป็น Data URL เพื่อแสดงผล
+          // แปลงเป็นรูปภาพ Base64
           const finalDataUrl = canvas.toDataURL('image/png');
           finalStrip.src = finalDataUrl;
-          resultBox.style.display = 'flex';
+          downloadBtn.href = finalDataUrl;
+          resultCard.style.display = 'flex';
 
-          // 3. สร้าง QR Code โดยใช้ API ที่เสถียร (api.qrserver.com)
-          // สามารถเปลี่ยน URL ด้านล่างเป็นลิงก์ Google Drive หรือระบบฝากรูปของคุณได้
-          const downloadUrl = encodeURIComponent(finalDataUrl);
-          
-          // ใช้ API qrserver ที่รองรับข้อมูลง่ายและไม่บล็อก
-          qrCode.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://github.com`;
+          // 3. สร้าง QR Code สำหรับเปิดโฟลเดอร์ Google Drive
+          qrcodeBox.innerHTML = "";
+          new QRCode(qrcodeBox, {
+            text: GOOGLE_DRIVE_FOLDER_URL,
+            width: 160,
+            height: 160,
+            colorDark : "#000000",
+            colorLight : "#ffffff",
+            correctLevel : QRCode.CorrectLevel.H
+          });
 
           resolve();
         };
       });
     }
 
-    // ฟังก์ชั่นคำนวณวาดภาพแบบ Crop Cover ไม่ให้ภาพยืด/หด หรือเหลือขอบขาว
+    // ฟังก์ชันตัดและครอบภาพให้พอดีช่องโดยไม่เสียอัตราส่วน
     function drawCoverImage(ctx, img, x, y, targetWidth, targetHeight) {
       const imgWidth = img.width;
       const imgHeight = img.height;
@@ -330,7 +372,7 @@
     }
 
     function resetBooth() {
-      resultBox.style.display = 'none';
+      resultCard.style.display = 'none';
       capturedPhotos = [];
     }
   </script>
