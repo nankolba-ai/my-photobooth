@@ -51,10 +51,34 @@
 
     /* ฝั่งกล้องถ่ายภาพ */
     .camera-card { width: 420px; }
+    
+    .camera-controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 12px;
+    }
+
+    .btn-switch {
+      background: #333;
+      color: #fff;
+      border: 1px solid #555;
+      padding: 8px 16px;
+      font-size: 14px;
+      border-radius: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.2s;
+    }
+    .btn-switch:hover { background: #444; }
+
     .video-wrapper {
       position: relative;
       width: 100%;
-      height: 560px;
+      height: 520px;
       background: #000;
       border-radius: 12px;
       overflow: hidden;
@@ -64,7 +88,11 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
-      transform: scaleX(-1); /* ส่องกระจก */
+    }
+
+    /* สะท้อนภาพสำหรับกล้องหน้า */
+    video.mirror {
+      transform: scaleX(-1);
     }
 
     .countdown-overlay {
@@ -79,6 +107,45 @@
       color: #f39c12;
       text-shadow: 0 0 20px rgba(0,0,0,0.8);
       display: none;
+    }
+
+    /* ตัวเลือกกรอบรูป */
+    .frame-selection {
+      width: 100%;
+      margin-top: 15px;
+    }
+    .frame-title {
+      font-size: 14px;
+      color: #ccc;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .frame-options {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+    .frame-option {
+      width: 70px;
+      height: 100px;
+      border: 2px solid #444;
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.2s;
+      opacity: 0.6;
+      background: #000;
+    }
+    .frame-option img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .frame-option.active {
+      border-color: #f39c12;
+      opacity: 1;
+      transform: scale(1.05);
+      box-shadow: 0 0 10px rgba(243, 156, 18, 0.5);
     }
 
     .btn-snap {
@@ -176,10 +243,32 @@
   <div class="main-container">
     <!-- หน้าจอกล้อง -->
     <div class="card camera-card">
+      
+      <div class="camera-controls">
+        <span style="font-size: 14px; color: #aaa;">ตัวเลือกกล้อง</span>
+        <button id="switch-cam-btn" class="btn-switch" onclick="toggleCamera()">
+          🔄 สลับกล้อง (หน้า)
+        </button>
+      </div>
+
       <div class="video-wrapper">
-        <video id="video" autoplay playsinline></video>
+        <video id="video" class="mirror" autoplay playsinline></video>
         <div id="countdown" class="countdown-overlay">3</div>
       </div>
+
+      <!-- แถบเลือกกรอบรูป -->
+      <div class="frame-selection">
+        <div class="frame-title">เลือกกรอบรูปที่ต้องการ</div>
+        <div class="frame-options">
+          <div class="frame-option active" id="opt-frame1" onclick="selectFrame('frame.png', 'opt-frame1')">
+            <img src="frame.png" alt="กรอบที่ 1">
+          </div>
+          <div class="frame-option" id="opt-frame2" onclick="selectFrame('frame2.png', 'opt-frame2')">
+            <img src="frame2.png" alt="กรอบที่ 2">
+          </div>
+        </div>
+      </div>
+
       <button id="snap-btn" class="btn-snap" onclick="startPhotoProcess()">เริ่มถ่ายภาพ (3 รูป)</button>
     </div>
 
@@ -215,13 +304,63 @@
     const downloadBtn = document.getElementById('download-btn');
     const qrcodeBox = document.getElementById('qrcode-box');
     const uploadStatus = document.getElementById('upload-status');
+    const switchCamBtn = document.getElementById('switch-cam-btn');
 
     let capturedPhotos = [];
+    let currentStream = null;
+    let currentFacingMode = 'user'; // 'user' = กล้องหน้า, 'environment' = กล้องหลัง
+    let selectedFrameSrc = 'frame.png'; // กรอบรูปที่เลือกเริ่มต้น
 
     // URL ของ Google Apps Script Web App
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5lhzcxE28syFgbaqW2u3j0Lk776vMzKkaNDT48-5xb6z0k7Bmdfuut5YwWVELwHf4/exec";
 
-    // 1. เสียงชัตเตอร์กล้องดิจิทัล
+    // 1. ระบบจัดการกล้อง (หน้า/หลัง)
+    async function startCamera() {
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+      }
+
+      const constraints = {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: currentFacingMode
+        }
+      };
+
+      try {
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = currentStream;
+
+        // สลับเอฟเฟกต์ Mirror เฉพาะตอนใช้กล้องหน้า
+        if (currentFacingMode === 'user') {
+          video.classList.add('mirror');
+          switchCamBtn.innerHTML = '🔄 สลับกล้อง (หน้า)';
+        } else {
+          video.classList.remove('mirror');
+          switchCamBtn.innerHTML = '🔄 สลับกล้อง (หลัง)';
+        }
+      } catch (err) {
+        alert("ไม่สามารถเปิดกล้องได้: " + err);
+      }
+    }
+
+    function toggleCamera() {
+      currentFacingMode = (currentFacingMode === 'user') ? 'environment' : 'user';
+      startCamera();
+    }
+
+    // เปิดกล้องเมื่อโหลดหน้าเว็บ
+    startCamera();
+
+    // 2. เลือกกรอบรูป
+    function selectFrame(frameSrc, elementId) {
+      selectedFrameSrc = frameSrc;
+      document.querySelectorAll('.frame-option').forEach(el => el.classList.remove('active'));
+      document.getElementById(elementId).classList.add('active');
+    }
+
+    // 3. เสียงชัตเตอร์กล้อง
     function playCameraShutterSound() {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const bufferSize = audioCtx.sampleRate * 0.12;
@@ -249,15 +388,6 @@
 
       noise.start();
     }
-
-    // เปิดกล้อง HD
-    navigator.mediaDevices.getUserMedia({ 
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } 
-    }).then(stream => {
-      video.srcObject = stream;
-    }).catch(err => {
-      alert("ไม่สามารถเปิดกล้องได้: " + err);
-    });
 
     async function startPhotoProcess() {
       capturedPhotos = [];
@@ -299,19 +429,21 @@
       tempCanvas.height = video.videoHeight || 720;
       const tCtx = tempCanvas.getContext('2d');
 
-      // Mirror ภาพ
-      tCtx.translate(tempCanvas.width, 0);
-      tCtx.scale(-1, 1);
+      // หากเป็นกล้องหน้า ให้ Mirror ภาพตอนบันทึกด้วย
+      if (currentFacingMode === 'user') {
+        tCtx.translate(tempCanvas.width, 0);
+        tCtx.scale(-1, 1);
+      }
+      
       tCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-
       capturedPhotos.push(tempCanvas);
     }
 
-    // วาดภาพรวมเข้ากับ frame.png
+    // วาดภาพรวมเข้ากับกรอบที่เลือก
     function generateFinalStrip() {
       return new Promise(resolve => {
         const frameImg = new Image();
-        frameImg.src = 'frame.png';
+        frameImg.src = selectedFrameSrc; // ใช้ไฟล์กรอบที่เลือก
         frameImg.crossOrigin = 'Anonymous';
 
         frameImg.onload = async () => {
@@ -319,7 +451,7 @@
           canvas.width = frameImg.width;
           canvas.height = frameImg.height;
 
-          // พิกัดช่องภาพที่ 1, 2, 3
+          // พิกัดช่องภาพทั้ง 3 ช่อง
           const slots = [
             { x: 135, y: 215, w: 398, h: 222 }, // ช่องที่ 1
             { x: 100, y: 446, w: 430, h: 232 }, // ช่องที่ 2
@@ -334,7 +466,7 @@
             }
           });
 
-          // 2. วาดกรอบ frame.png ทับด้านบนรูปถ่าย
+          // 2. วาดกรอบรูปทับด้านบนรูปถ่าย
           ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
 
           // แปลงเป็นรูปภาพ Base64
@@ -343,7 +475,7 @@
           downloadBtn.href = finalDataUrl;
           resultCard.style.display = 'flex';
 
-          // 3. ส่งภาพไปยัง Apps Script เพื่ออัปโหลด และดึงลิงก์รูปถ่ายเฉพาะมาสร้าง QR Code
+          // 3. ส่งภาพไปยัง Google Drive
           uploadToGoogleDrive(finalDataUrl);
 
           resolve();
@@ -370,9 +502,8 @@
 
         const result = await response.json();
 
-        // ตรวจสอบว่าส่งกลับมาสำเร็จและมี URL เฉพาะของไฟล์รูปภาพหรือไม่
         if (result.status === "success" && result.url) {
-          const singleFileUrl = result.url; // URL ตรงเฉพาะรูปภาพนี้เท่านั้น
+          const singleFileUrl = result.url;
           
           uploadStatus.innerText = "อัปโหลดสำเร็จ! สแกนเพื่อดาวน์โหลดรูปของคุณ";
           uploadStatus.style.color = "#27ae60";
