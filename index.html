@@ -189,9 +189,9 @@
       <img id="final-strip" class="strip-img" alt="Photo Strip">
 
       <div class="qr-container">
-        <div class="qr-title">สแกนเพื่อดาวน์โหลดรูปภาพ</div>
+        <div class="qr-title">สแกนเพื่อรับรูปภาพของคุณ</div>
         <div class="qr-box" id="qrcode-box">
-          <span style="color:#666; font-size:14px;" id="qr-loading">กำลังอัปโหลด...</span>
+          <span style="color:#666; font-size:14px;" id="qr-loading">กำลังสร้าง QR Code...</span>
         </div>
         <div id="upload-status" class="upload-status">กำลังส่งภาพไปยัง Google Drive...</div>
         
@@ -218,7 +218,7 @@
 
     let capturedPhotos = [];
 
-    // URL ของ Google Apps Script Web App ที่อัปเดตล่าสุด
+    // URL ของ Google Apps Script Web App
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5lhzcxE28syFgbaqW2u3j0Lk776vMzKkaNDT48-5xb6z0k7Bmdfuut5YwWVELwHf4/exec";
 
     // 1. เสียงชัตเตอร์กล้องดิจิทัล
@@ -326,7 +326,7 @@
             { x: 132, y: 707, w: 420, h: 222 }  // ช่องที่ 3
           ];
 
-          // 1. วาดรูปถ่ายทั้ง 3 รูปลงบน Canvas ก่อน
+          // 1. วาดรูปถ่ายทั้ง 3 รูปลงบน Canvas
           capturedPhotos.forEach((photo, idx) => {
             if (idx < 3) {
               const s = slots[idx];
@@ -343,7 +343,7 @@
           downloadBtn.href = finalDataUrl;
           resultCard.style.display = 'flex';
 
-          // 3. ส่งภาพไปยัง Web App เพื่ออัปโหลดเข้า Drive Folder
+          // 3. ส่งภาพไปยัง Apps Script เพื่ออัปโหลด และดึงลิงก์รูปถ่ายเฉพาะมาสร้าง QR Code
           uploadToGoogleDrive(finalDataUrl);
 
           resolve();
@@ -353,7 +353,7 @@
 
     // ฟังก์ชันส่งภาพไปยัง Google Apps Script
     async function uploadToGoogleDrive(base64Image) {
-      qrcodeBox.innerHTML = '<span style="color:#666; font-size:14px;">กำลังอัปโหลด...</span>';
+      qrcodeBox.innerHTML = '<span style="color:#666; font-size:14px;">กำลังสร้าง QR Code...</span>';
       uploadStatus.innerText = "กำลังส่งภาพไปยัง Google Drive...";
       uploadStatus.style.color = "#f39c12";
 
@@ -370,15 +370,17 @@
 
         const result = await response.json();
 
-        if (result.status === "success" || result.url) {
-          const fileUrl = result.url;
-          uploadStatus.innerText = "อัปโหลดสำเร็จ! สแกน QR Code เพื่อรับรูปภาพได้เลย";
+        // ตรวจสอบว่าส่งกลับมาสำเร็จและมี URL เฉพาะของไฟล์รูปภาพหรือไม่
+        if (result.status === "success" && result.url) {
+          const singleFileUrl = result.url; // URL ตรงเฉพาะรูปภาพนี้เท่านั้น
+          
+          uploadStatus.innerText = "อัปโหลดสำเร็จ! สแกนเพื่อดาวน์โหลดรูปของคุณ";
           uploadStatus.style.color = "#27ae60";
 
-          // สร้าง QR Code ของรูปภาพเฉพาะภาพนั้น
+          // สร้าง QR Code จาก URL รูปภาพเฉพาะบุคคล
           qrcodeBox.innerHTML = "";
           new QRCode(qrcodeBox, {
-            text: fileUrl,
+            text: singleFileUrl,
             width: 160,
             height: 160,
             colorDark : "#000000",
@@ -390,13 +392,13 @@
         }
       } catch (error) {
         console.error(error);
-        uploadStatus.innerText = "อัปโหลดไม่สำเร็จ (แต่สามารถบันทึกลงเครื่องได้เลย)";
+        uploadStatus.innerText = "อัปโหลดไม่สำเร็จ (บันทึกรูปผ่านปุ่มด้านล่างแทนได้)";
         uploadStatus.style.color = "#e74c3c";
-        qrcodeBox.innerHTML = '<span style="color:#999; font-size:12px;">เกิดข้อผิดพลาดในการสร้าง QR</span>';
+        qrcodeBox.innerHTML = '<span style="color:#999; font-size:12px;">ไม่สามารถแสดง QR Code ได้</span>';
       }
     }
 
-    // ฟังก์ชันตัดและครอบภาพให้พอดีช่องโดยไม่เสียอัตราส่วน
+    // ตัดและครอบภาพให้พอดีช่องโดยไม่เสียอัตราส่วน
     function drawCoverImage(ctx, img, x, y, targetWidth, targetHeight) {
       const imgWidth = img.width;
       const imgHeight = img.height;
