@@ -332,7 +332,6 @@
         currentStream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = currentStream;
 
-        // สลับเอฟเฟกต์ Mirror เฉพาะตอนใช้กล้องหน้า
         if (currentFacingMode === 'user') {
           video.classList.add('mirror');
           switchCamBtn.innerHTML = '🔄 สลับกล้อง (หน้า)';
@@ -447,18 +446,18 @@
         frameImg.crossOrigin = 'Anonymous';
 
         frameImg.onload = async () => {
-          // ขนาดจริงของกรอบ (682 x 1024)
+          // ขนาดจริงของกรอบ
           canvas.width = frameImg.width;
           canvas.height = frameImg.height;
 
-          // พิกัดช่องภาพทั้ง 3 ช่อง
+          // พิกัดตำแหน่งช่องว่างภาพทั้ง 3 ช่องที่วัดจากกรอบรูปจริง (อัปเดตแล้ว)
           const slots = [
-            { x: 135, y: 215, w: 398, h: 222 }, // ช่องที่ 1
-            { x: 100, y: 446, w: 430, h: 232 }, // ช่องที่ 2
-            { x: 132, y: 707, w: 420, h: 222 }  // ช่องที่ 3
+            { x: 255, y: 241, w: 514, h: 305 }, // ช่องที่ 1
+            { x: 254, y: 672, w: 518, h: 313 }, // ช่องที่ 2
+            { x: 260, y: 1087, w: 502, h: 304 }  // ช่องที่ 3
           ];
 
-          // 1. วาดรูปถ่ายทั้ง 3 รูปลงบน Canvas
+          // 1. วาดรูปถ่ายทั้ง 3 รูปลงบน Canvas ด้านหลัง
           capturedPhotos.forEach((photo, idx) => {
             if (idx < 3) {
               const s = slots[idx];
