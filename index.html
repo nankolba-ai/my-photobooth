@@ -75,16 +75,20 @@
     }
     .btn-switch:hover { background: #444; }
 
-    .video-wrapper {
+    /* กรอบพรีวิวกล้องซ้อนกรอบจริง */
+    .preview-container {
       position: relative;
-      width: 100%;
-      height: 520px;
+      width: 320px;
+      height: 480px;
       background: #000;
       border-radius: 12px;
       overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.8);
     }
 
     video {
+      position: absolute;
+      top: 0; left: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
@@ -93,6 +97,16 @@
     /* สะท้อนภาพสำหรับกล้องหน้า */
     video.mirror {
       transform: scaleX(-1);
+    }
+
+    /* Canvas ซ้อนพรีวิวกรอบรูปและรูปที่ถ่ายแล้วสดๆ */
+    .overlay-canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 2;
     }
 
     .countdown-overlay {
@@ -106,6 +120,7 @@
       font-weight: bold;
       color: #f39c12;
       text-shadow: 0 0 20px rgba(0,0,0,0.8);
+      z-index: 10;
       display: none;
     }
 
@@ -231,7 +246,7 @@
       width: 100%;
     }
 
-    canvas { display: none; }
+    #output-canvas { display: none; }
   </style>
 </head>
 <body>
@@ -241,18 +256,20 @@
   </div>
 
   <div class="main-container">
-    <!-- หน้าจอกล้อง -->
+    <!-- หน้าจอกล้องถ่ายภาพ -->
     <div class="card camera-card">
       
       <div class="camera-controls">
-        <span style="font-size: 14px; color: #aaa;">ตัวเลือกกล้อง</span>
+        <span style="font-size: 14px; color: #aaa;">กล้องถ่ายรูป</span>
         <button id="switch-cam-btn" class="btn-switch" onclick="toggleCamera()">
           🔄 สลับกล้อง (หน้า)
         </button>
       </div>
 
-      <div class="video-wrapper">
+      <!-- ช่องพรีวิวสดแบบซ้อนกรอบ -->
+      <div class="preview-container">
         <video id="video" class="mirror" autoplay playsinline></video>
+        <canvas id="overlay-canvas" class="overlay-canvas"></canvas>
         <div id="countdown" class="countdown-overlay">3</div>
       </div>
 
@@ -284,19 +301,21 @@
         </div>
         <div id="upload-status" class="upload-status">กำลังส่งภาพไปยัง Google Drive...</div>
         
-        <!-- ลิงก์ดาวน์โหลดตรงลงอุปกรณ์ -->
         <a id="download-btn" class="btn-download" download="photobooth.png">📥 ดาวน์โหลดลงเครื่อง</a>
         <button class="btn-secondary" onclick="resetBooth()">ถ่ายใหม่อีกครั้ง</button>
       </div>
     </div>
   </div>
 
-  <canvas id="canvas"></canvas>
+  <canvas id="output-canvas"></canvas>
 
   <script>
     const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
+    const overlayCanvas = document.getElementById('overlay-canvas');
+    const overlayCtx = overlayCanvas.getContext('2d');
+    const outputCanvas = document.getElementById('output-canvas');
+    const outputCtx = outputCanvas.getContext('2d');
+    
     const countdownEl = document.getElementById('countdown');
     const finalStrip = document.getElementById('final-strip');
     const resultCard = document.getElementById('result-card');
@@ -308,13 +327,15 @@
 
     let capturedPhotos = [];
     let currentStream = null;
-    let currentFacingMode = 'user'; // 'user' = กล้องหน้า, 'environment' = กล้องหลัง
-    let selectedFrameSrc = 'frame.png'; // กรอบรูปที่เลือกเริ่มต้น
+    let currentFacingMode = 'user'; 
+    let selectedFrameSrc = 'frame.png'; 
+    let loadedFrameImg = new Image();
+    let detectedSlots = []; // เก็บพิกัดช่องว่างที่คำนวณได้อัตโนมัติ
+    let currentPhotoIndex = 0; // ลำดับรูปที่กำลังถ่าย (0, 1, 2)
 
-    // URL ของ Google Apps Script Web App
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw5lhzcxE28syFgbaqW2u3j0Lk776vMzKkaNDT48-5xb6z0k7Bmdfuut5YwWVELwHf4/exec";
 
-    // 1. ระบบจัดการกล้อง (หน้า/หลัง)
+    // 1. ระบบกล้อง
     async function startCamera() {
       if (currentStream) {
         currentStream.getTracks().forEach(track => track.stop());
@@ -349,17 +370,125 @@
       startCamera();
     }
 
-    // เปิดกล้องเมื่อโหลดหน้าเว็บ
-    startCamera();
+    // 2. โหลดกรอบและค้นหาช่องว่างโปร่งใสอัตโนมัติ (Auto-Detect Slots)
+    function loadAndAnalyzeFrame(src) {
+      selectedFrameSrc = src;
+      loadedFrameImg = new Image();
+      loadedFrameImg.crossOrigin = 'Anonymous';
+      loadedFrameImg.src = src;
 
-    // 2. เลือกกรอบรูป
-    function selectFrame(frameSrc, elementId) {
-      selectedFrameSrc = frameSrc;
-      document.querySelectorAll('.frame-option').forEach(el => el.classList.remove('active'));
-      document.getElementById(elementId).classList.add('active');
+      loadedFrameImg.onload = () => {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = loadedFrameImg.width;
+        tempCanvas.height = loadedFrameImg.height;
+        const tCtx = tempCanvas.getContext('2d');
+        tCtx.drawImage(loadedFrameImg, 0, 0);
+
+        const imgData = tCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const data = imgData.data;
+
+        // ตรวจหาพิกัดพื้นที่ที่มี Alpha < 100 (ช่องโปร่งใส)
+        let alphaGrid = [];
+        for (let y = 0; y < tempCanvas.height; y++) {
+          alphaGrid[y] = [];
+          for (let x = 0; x < tempCanvas.width; x++) {
+            let a = data[(y * tempCanvas.width + x) * 4 + 3];
+            alphaGrid[y][x] = a < 100 ? 1 : 0;
+          }
+        }
+
+        // ค้นหารอบขอบช่องสี่เหลี่ยมโปร่งใส 3 ช่อง
+        detectedSlots = findFrameSlots(alphaGrid, tempCanvas.width, tempCanvas.height);
+        
+        // ตั้งค่าขนาด Canvas พรีวิวให้ตรงกับอัตราส่วนกรอบ
+        overlayCanvas.width = loadedFrameImg.width;
+        overlayCanvas.height = loadedFrameImg.height;
+
+        renderLiveOverlay();
+      };
     }
 
-    // 3. เสียงชัตเตอร์กล้อง
+    // ฟังก์ชันคำนวณหากรอบสี่เหลี่ยม 3 ช่องจากไฟล์ PNG
+    function findFrameSlots(grid, width, height) {
+      let slots = [];
+      let visited = Array.from({ length: height }, () => new Uint8Array(width));
+
+      for (let y = 0; y < height; y += 5) {
+        for (let x = 0; x < width; x += 5) {
+          if (grid[y][x] === 1 && !visited[y][x]) {
+            // หาขอบเขต Bounding Box
+            let minX = x, maxX = x, minY = y, maxY = y;
+            let queue = [[x, y]];
+            visited[y][x] = 1;
+
+            let count = 0;
+            while(queue.length > 0) {
+              let [cx, cy] = queue.pop();
+              count++;
+              if (cx < minX) minX = cx;
+              if (cx > maxX) maxX = cx;
+              if (cy < minY) minY = cy;
+              if (cy > maxY) maxY = cy;
+
+              let neighbors = [[cx+10, cy], [cx-10, cy], [cx, cy+10], [cx, cy-10]];
+              for (let [nx, ny] of neighbors) {
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                  if (grid[ny][nx] === 1 && !visited[ny][nx]) {
+                    visited[ny][nx] = 1;
+                    queue.push([nx, ny]);
+                  }
+                }
+              }
+            }
+
+            let w = maxX - minX;
+            let h = maxY - minY;
+            if (w > width * 0.3 && h > height * 0.1) {
+              slots.push({ x: minX, y: minY, w: w, h: h });
+            }
+          }
+        }
+      }
+
+      slots.sort((a, b) => a.y - b.y);
+      return slots.slice(0, 3);
+    }
+
+    // 3. วาดภาพซ้อน Real-time บนหน้าจอกล้อง (พรีวิวเห็นรูป 1-2 ก่อนหน้า + กรอบ)
+    function renderLiveOverlay() {
+      requestAnimationFrame(renderLiveOverlay);
+
+      if (!loadedFrameImg.complete || detectedSlots.length < 3) return;
+
+      overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+      // วาดรูปถ่ายก่อนหน้าที่ถ่ายเสร็จแล้วลงในช่อง
+      capturedPhotos.forEach((photoCanvas, idx) => {
+        if (idx < detectedSlots.length) {
+          const s = detectedSlots[idx];
+          drawCoverImage(overlayCtx, photoCanvas, s.x, s.y, s.w, s.h);
+        }
+      });
+
+      // วาดไฮไลท์กล่องสีทองบอกช่องที่กำลังจะถ่ายในปัจจุบัน
+      if (currentPhotoIndex < detectedSlots.length) {
+        const activeSlot = detectedSlots[currentPhotoIndex];
+        overlayCtx.strokeStyle = '#f39c12';
+        overlayCtx.lineWidth = 6;
+        overlayCtx.strokeRect(activeSlot.x, activeSlot.y, activeSlot.w, activeSlot.h);
+      }
+
+      // วาดกรอบรูปทับลงด้านบน
+      overlayCtx.drawImage(loadedFrameImg, 0, 0, overlayCanvas.width, overlayCanvas.height);
+    }
+
+    function selectFrame(frameSrc, elementId) {
+      document.querySelectorAll('.frame-option').forEach(el => el.classList.remove('active'));
+      document.getElementById(elementId).classList.add('active');
+      loadAndAnalyzeFrame(frameSrc);
+    }
+
+    // 4. เสียงชัตเตอร์
     function playCameraShutterSound() {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const bufferSize = audioCtx.sampleRate * 0.12;
@@ -388,11 +517,14 @@
       noise.start();
     }
 
+    // 5. กระบวนการถ่ายภาพ 3 รูป
     async function startPhotoProcess() {
       capturedPhotos = [];
+      currentPhotoIndex = 0;
       snapBtn.disabled = true;
 
-      for (let i = 1; i <= 3; i++) {
+      for (let i = 0; i < 3; i++) {
+        currentPhotoIndex = i;
         await runCountdown(3);
         playCameraShutterSound();
         capturePhoto();
@@ -428,7 +560,6 @@
       tempCanvas.height = video.videoHeight || 720;
       const tCtx = tempCanvas.getContext('2d');
 
-      // หากเป็นกล้องหน้า ให้ Mirror ภาพตอนบันทึกด้วย
       if (currentFacingMode === 'user') {
         tCtx.translate(tempCanvas.width, 0);
         tCtx.scale(-1, 1);
@@ -438,51 +569,34 @@
       capturedPhotos.push(tempCanvas);
     }
 
-    // วาดภาพรวมเข้ากับกรอบที่เลือก
+    // 6. รวมภาพถ่ายทั้งหมดเข้ากับกรอบรูป
     function generateFinalStrip() {
       return new Promise(resolve => {
-        const frameImg = new Image();
-        frameImg.src = selectedFrameSrc; // ใช้ไฟล์กรอบที่เลือก
-        frameImg.crossOrigin = 'Anonymous';
+        outputCanvas.width = loadedFrameImg.width;
+        outputCanvas.height = loadedFrameImg.height;
 
-        frameImg.onload = async () => {
-          // ขนาดจริงของกรอบ
-          canvas.width = frameImg.width;
-          canvas.height = frameImg.height;
+        // วาดภาพทั้ง 3 รูปลงในช่อง
+        capturedPhotos.forEach((photo, idx) => {
+          if (idx < detectedSlots.length) {
+            const s = detectedSlots[idx];
+            drawCoverImage(outputCtx, photo, s.x, s.y, s.w, s.h);
+          }
+        });
 
-          // พิกัดตำแหน่งช่องว่างภาพทั้ง 3 ช่องที่วัดจากกรอบรูปจริง (อัปเดตแล้ว)
-          const slots = [
-            { x: 255, y: 241, w: 514, h: 305 }, // ช่องที่ 1
-            { x: 254, y: 672, w: 518, h: 313 }, // ช่องที่ 2
-            { x: 260, y: 1087, w: 502, h: 304 }  // ช่องที่ 3
-          ];
+        // วาดกรอบรูปปิดทับ
+        outputCtx.drawImage(loadedFrameImg, 0, 0, outputCanvas.width, outputCanvas.height);
 
-          // 1. วาดรูปถ่ายทั้ง 3 รูปลงบน Canvas ด้านหลัง
-          capturedPhotos.forEach((photo, idx) => {
-            if (idx < 3) {
-              const s = slots[idx];
-              drawCoverImage(ctx, photo, s.x, s.y, s.w, s.h);
-            }
-          });
+        const finalDataUrl = outputCanvas.toDataURL('image/png');
+        finalStrip.src = finalDataUrl;
+        downloadBtn.href = finalDataUrl;
+        resultCard.style.display = 'flex';
 
-          // 2. วาดกรอบรูปทับด้านบนรูปถ่าย
-          ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
-
-          // แปลงเป็นรูปภาพ Base64
-          const finalDataUrl = canvas.toDataURL('image/png');
-          finalStrip.src = finalDataUrl;
-          downloadBtn.href = finalDataUrl;
-          resultCard.style.display = 'flex';
-
-          // 3. ส่งภาพไปยัง Google Drive
-          uploadToGoogleDrive(finalDataUrl);
-
-          resolve();
-        };
+        uploadToGoogleDrive(finalDataUrl);
+        resolve();
       });
     }
 
-    // ฟังก์ชันส่งภาพไปยัง Google Apps Script
+    // 7. อัปโหลดลง Google Drive & สร้าง QR Code
     async function uploadToGoogleDrive(base64Image) {
       qrcodeBox.innerHTML = '<span style="color:#666; font-size:14px;">กำลังสร้าง QR Code...</span>';
       uploadStatus.innerText = "กำลังส่งภาพไปยัง Google Drive...";
@@ -507,7 +621,6 @@
           uploadStatus.innerText = "อัปโหลดสำเร็จ! สแกนเพื่อดาวน์โหลดรูปของคุณ";
           uploadStatus.style.color = "#27ae60";
 
-          // สร้าง QR Code จาก URL รูปภาพเฉพาะบุคคล
           qrcodeBox.innerHTML = "";
           new QRCode(qrcodeBox, {
             text: singleFileUrl,
@@ -528,7 +641,7 @@
       }
     }
 
-    // ตัดและครอบภาพให้พอดีช่องโดยไม่เสียอัตราส่วน
+    // ครอบตัดรูปภาพให้เข้าช่องพอดี ไม่เสียอัตราส่วน
     function drawCoverImage(ctx, img, x, y, targetWidth, targetHeight) {
       const imgWidth = img.width;
       const imgHeight = img.height;
@@ -556,7 +669,12 @@
     function resetBooth() {
       resultCard.style.display = 'none';
       capturedPhotos = [];
+      currentPhotoIndex = 0;
     }
+
+    // เริ่มต้นระบบ
+    startCamera();
+    loadAndAnalyzeFrame(selectedFrameSrc);
   </script>
 </body>
 </html>
